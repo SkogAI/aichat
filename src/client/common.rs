@@ -71,51 +71,10 @@ pub trait Client: Sync + Send {
             return Ok(ChatCompletionsOutput::new(&content));
         }
         let client = self.build_client()?;
-        let mut data = input.prepare_completion_data(self.model(), false)?;
-
-        // Run before_chat_hook if configured
-        if let Some(hook_path) = self.global_config().read().before_chat_hook.clone() {
-            data = self
-                .global_config()
-                .read()
-                .run_chat_hook(&hook_path, &data, "before")?;
-        }
-
-        let result = self
-            .chat_completions_inner(&client, data)
+        let data = input.prepare_completion_data(self.model(), false)?;
+        self.chat_completions_inner(&client, data)
             .await
-            .with_context(|| "Failed to call chat-completions api")?;
-
-        // Run after_chat_hook if configured (on the output text)
-        if let Some(hook_path) = self.global_config().read().after_chat_hook.clone() {
-            // For after hook, we need to pass the response as messages
-            let response_message = Message::new(
-                crate::client::MessageRole::Assistant,
-                crate::client::MessageContent::Text(result.text.clone()),
-            );
-            let hook_data = ChatCompletionsData {
-                messages: vec![response_message],
-                temperature: None,
-                top_p: None,
-                functions: None,
-                stream: false,
-            };
-            let modified_data = self
-                .global_config()
-                .read()
-                .run_chat_hook(&hook_path, &hook_data, "after")?;
-            if let Some(msg) = modified_data.messages.first() {
-                return Ok(ChatCompletionsOutput {
-                    text: msg.content.to_text(),
-                    tool_calls: result.tool_calls,
-                    id: result.id,
-                    input_tokens: result.input_tokens,
-                    output_tokens: result.output_tokens,
-                });
-            }
-        }
-
-        Ok(result)
+            .with_context(|| "Failed to call chat-completions api")
     }
 
     async fn chat_completions_streaming(
@@ -133,13 +92,7 @@ pub trait Client: Sync + Send {
                     return Ok(());
                 }
                 let client = self.build_client()?;
-                let mut data = input.prepare_completion_data(self.model(), true)?;
-
-                // Run before_chat_hook if configured
-                if let Some(hook_path) = self.global_config().read().before_chat_hook.clone() {
-                    data = self.global_config().read().run_chat_hook(&hook_path, &data, "before")?;
-                }
-
+                let data = input.prepare_completion_data(self.model(), true)?;
                 self.chat_completions_streaming_inner(&client, handler, data).await
             } => {
                 handler.done();
@@ -324,7 +277,7 @@ impl RequestData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ChatCompletionsData {
     pub messages: Vec<Message>,
     pub temperature: Option<f64>,
@@ -504,30 +457,7 @@ pub async fn call_chat_completions_streaming(
 
     render_ret?;
 
-    let (mut text, tool_calls) = handler.take();
-
-    // Run after_chat_hook if configured (for streaming responses)
-    if let Some(hook_path) = client.global_config().read().after_chat_hook.clone() {
-        let response_message = Message::new(
-            crate::client::MessageRole::Assistant,
-            crate::client::MessageContent::Text(text.clone()),
-        );
-        let hook_data = ChatCompletionsData {
-            messages: vec![response_message],
-            temperature: None,
-            top_p: None,
-            functions: None,
-            stream: false,
-        };
-        let modified_data = client
-            .global_config()
-            .read()
-            .run_chat_hook(&hook_path, &hook_data, "after")?;
-        if let Some(msg) = modified_data.messages.first() {
-            text = msg.content.to_text();
-        }
-    }
-
+    let (text, tool_calls) = handler.take();
     match send_ret {
         Ok(_) => {
             if !text.is_empty() && !text.ends_with('\n') {

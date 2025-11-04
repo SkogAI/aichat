@@ -11,9 +11,8 @@ pub use self::role::{
 use self::session::Session;
 
 use crate::client::{
-    create_client_config, list_client_types, list_models, ChatCompletionsData, ClientConfig,
-    Message, MessageContentToolCalls, Model, ModelType, ProviderModels,
-    OPENAI_COMPATIBLE_PROVIDERS,
+    create_client_config, list_client_types, list_models, ClientConfig, MessageContentToolCalls,
+    Model, ModelType, ProviderModels, OPENAI_COMPATIBLE_PROVIDERS,
 };
 use crate::function::{FunctionDeclaration, Functions, ToolResult};
 use crate::rag::Rag;
@@ -26,7 +25,7 @@ use indexmap::IndexMap;
 use inquire::{list_option::ListOption, validator::Validation, Confirm, MultiSelect, Select, Text};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use simplelog::LevelFilter;
 use std::collections::{HashMap, HashSet};
 use std::{
@@ -147,9 +146,6 @@ pub struct Config {
     pub save_shell_history: bool,
     pub sync_models_url: Option<String>,
 
-    pub before_chat_hook: Option<String>,
-    pub after_chat_hook: Option<String>,
-
     pub clients: Vec<ClientConfig>,
 
     #[serde(skip)]
@@ -224,9 +220,6 @@ impl Default for Config {
             user_agent: None,
             save_shell_history: true,
             sync_models_url: None,
-
-            before_chat_hook: None,
-            after_chat_hook: None,
 
             clients: vec![],
 
@@ -609,7 +602,7 @@ impl Config {
             ("stream", self.stream.to_string()),
             ("save", self.save.to_string()),
             ("keybindings", self.keybindings.clone()),
-            ("wrap", self.wrap.to_string()),
+            ("wrap", wrap),
             ("wrap_code", self.wrap_code.to_string()),
             ("highlight", self.highlight.to_string()),
             ("theme", format_option_value(&self.theme)),
@@ -2051,80 +2044,6 @@ impl Config {
         }
 
         output
-    }
-
-    pub fn run_chat_hook(
-        &self,
-        hook_path: &str,
-        data: &ChatCompletionsData,
-        stage: &str,
-    ) -> Result<ChatCompletionsData> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-
-        // Serialize the messages to JSON for the hook
-        let hook_input = json!({
-            "stage": stage,
-            "messages": data.messages,
-            "temperature": data.temperature,
-            "top_p": data.top_p,
-            "functions": data.functions,
-            "stream": data.stream,
-        });
-
-        let json_input = serde_json::to_string_pretty(&hook_input)
-            .context("Failed to serialize chat data for hook")?;
-
-        // Execute the hook script
-        let mut child = Command::new(hook_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .with_context(|| format!("Failed to execute hook: {}", hook_path))?;
-
-        // Write JSON to stdin
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(json_input.as_bytes())
-                .context("Failed to write to hook stdin")?;
-        }
-
-        // Wait for the hook to complete and read output
-        let output = child
-            .wait_with_output()
-            .context("Failed to wait for hook process")?;
-
-        if !output.status.success() {
-            bail!("Hook {} failed with status: {}", hook_path, output.status);
-        }
-
-        // Parse the modified JSON from stdout
-        let hook_output: Value = serde_json::from_slice(&output.stdout)
-            .context("Failed to parse hook output as JSON")?;
-
-        // Extract the modified messages
-        let modified_messages: Vec<Message> = serde_json::from_value(
-            hook_output
-                .get("messages")
-                .ok_or_else(|| anyhow!("Hook output missing 'messages' field"))?
-                .clone(),
-        )
-        .context("Failed to parse modified messages")?;
-
-        // Create new ChatCompletionsData with modified messages
-        let mut modified_data = data.clone();
-        modified_data.messages = modified_messages;
-
-        // Allow hook to modify temperature/top_p if provided
-        if let Some(temp) = hook_output.get("temperature").and_then(|v| v.as_f64()) {
-            modified_data.temperature = Some(temp);
-        }
-        if let Some(top_p) = hook_output.get("top_p").and_then(|v| v.as_f64()) {
-            modified_data.top_p = Some(top_p);
-        }
-
-        Ok(modified_data)
     }
 
     pub fn before_chat_completion(&mut self, input: &Input) -> Result<()> {
