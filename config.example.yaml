@@ -76,6 +76,13 @@ light_theme: false # Activates a light color theme when true. env: AICHAT_LIGHT_
 left_prompt: "{color.green}{?session {?agent {agent}>}{session}{?role /}}{!session {?agent {agent}>}}{role}{?rag @{rag}}{color.cyan}{?session )}{!session >}{color.reset} "
 right_prompt: "{color.purple}{?session {?consume_tokens {consume_tokens}({consume_percent}%)}{!consume_tokens {consume_tokens}}}{color.reset}"
 
+# ---- hooks ----
+# Scripts that run before/after each chat completion API call.
+# The hook receives JSON on stdin with messages, temperature, top_p, functions, stream fields.
+# It must output modified JSON on stdout. See examples/hook_inspect.sh and examples/hook_redact.sh.
+before_chat_hook: null # Path to script that can inspect/modify the request before sending (e.g. /path/to/hook_inspect.sh)
+after_chat_hook: null # Path to script that can inspect/modify the response after receiving (e.g. /path/to/hook_redact.sh)
+
 # ---- misc ----
 serve_addr: 127.0.0.1:8000 # Server listening address
 user_agent: null # Set User-Agent HTTP header, use `auto` for aichat/<current-version>
